@@ -156,25 +156,54 @@ class Scheduler:
                     io.load_job(job)
                     self.io_queue.enqueue(job, 0)
 
-    def process_running_queue(self, client_id, session_id):
+    def process_running_queue(self, client_id, session_id, algorithm, time_quantum = 5):
         """Processes the running queue."""
         if not self.running_queue.is_empty():
             for job in self.running_queue.jobs:
-                job.decrement_duration()
-                if job.burst_complete():
-                    for cpu in cpus:
-                        if cpu.job and cpu.job.job_id == job.job_id:
-                            cpu.free()
-                    job.get_job_burst(client_id, session_id, job.job_id)
-                    if job.burst_type == "IO":
-                        self.waiting_queue.enqueue(job, 0)
-                        self.running_queue.remove(job)
-                    elif job.burst_type == "EXIT":
-                        self.exit_queue.enqueue(job, 0)
-                        self.running_queue.remove(job)
-                    else:
+                if algorithm == "FCFS":
+                    job.decrement_duration()
+                    if job.burst_complete():
+                        for cpu in cpus:
+                            if cpu.job and cpu.job.job_id == job.job_id:
+                                cpu.free()
+                        job.get_job_burst(client_id, session_id, job.job_id)
+                        if job.burst_type == "IO":
+                            self.waiting_queue.enqueue(job, 0)
+                            self.running_queue.remove(job)
+                        elif job.burst_type == "EXIT":
+                            self.exit_queue.enqueue(job, 0)
+                            self.running_queue.remove(job)
+                        else:
+                            self.ready_queue.enqueue(job)
+                            self.running_queue.remove(job)
+                elif algorithm == "RR":
+                    if job.time_slice_remaining is None:
+                        job.time_slice_remaining = time_quantum
+
+                    if job.burst_complete():
+                        for cpu in self.cpus:
+                            if cpu.job and cpu.job.job_id == job.job_id:
+                                cpu.free()
+                        job.get_job_burst(client_id, session_id, job.job_id)
+                        if job.burst_type == "IO":
+                            self.waiting_queue.enqueue(job, 0)
+                            self.running_queue.remove(job)
+                        elif job.burst_type == "EXIT":
+                            self.exit_queue.enqueue(job, 0)
+                            self.running_queue.remove(job)
+                        else:
+                            self.ready_queue.enqueue(job)
+                            self.running_queue.remove(job)
+                    elif job.time_slice_remaining == 0:
+                        for cpu in self.cpus:
+                            if cpu.job and cpu.job.job_id == job.job_id:
+                                cpu.free()
+                        job.time_slice_remaining = time_quantum
                         self.ready_queue.enqueue(job)
                         self.running_queue.remove(job)
+                    else:
+                        job.decrement_duration()
+                        job.time_slice_remaining -= 1
 
     def process_io_queue(self, client_id, session_id):
         if not self.io_queue.is_empty():
@@ -223,10 +252,11 @@ class Scheduler:
                 self.fetch_jobs(client_id, session_id, clock_time)
                 self.move_to_ready_queue(client_id, session_id)
                 self.process_ready_queue()
-                self.process_running_queue(client_id, session_id)
+                self.process_running_queue(client_id, session_id, algorithm="RR")
                 self.process_waiting_queue()
                 self.process_io_queue(client_id, session_id)
                 live.update(self.generate_table())
+                sleep(0.5)
 
 
 def api_start():

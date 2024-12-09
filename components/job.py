@@ -12,6 +12,7 @@ class Job:
         self.burst_id = 0
         self.burst_type = ""
         self.burst_duration = 0
+        self.time_slice_remaining = None
 
     def is_complete(self):
         """Returns True if the job has no more bursts."""
