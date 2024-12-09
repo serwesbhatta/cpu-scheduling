@@ -12,6 +12,10 @@ class Queue:
     def dequeue(self):
         """Removes and returns the last item in the queue."""
         return self.jobs.pop()
+    
+    def remove(self, job):
+        """Removes and returns the item at the given index."""
+        return self.jobs.remove(job)
 
     def is_empty(self):
         """Returns True if the queue is empty."""

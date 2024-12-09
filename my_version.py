@@ -168,13 +168,13 @@ class Scheduler:
                     job.get_job_burst(client_id, session_id, job.job_id)
                     if job.burst_type == "IO":
                         self.waiting_queue.enqueue(job, 0)
-                        self.running_queue.dequeue()
+                        self.running_queue.remove(job)
                     elif job.burst_type == "EXIT":
                         self.exit_queue.enqueue(job, 0)
-                        self.running_queue.dequeue()
+                        self.running_queue.remove(job)
                     else:
                         self.ready_queue.enqueue(job)
-                        self.running_queue.dequeue()
+                        self.running_queue.remove(job)
 
     def process_io_queue(self, client_id, session_id):
         if not self.io_queue.is_empty():
@@ -186,14 +186,15 @@ class Scheduler:
                     job.get_job_burst(client_id, session_id, job.job_id)
                     if job.burst_type == "IO":
                         self.waiting_queue.enqueue(job)
-                        self.io_queue.dequeue()
+                        self.io_queue.remove(job)
                     elif job.burst_type == "EXIT":
                         self.exit_queue.enqueue(job, 0)
-                        self.io_queue.dequeue()
+                        self.io_queue.remove(job)
                     else:
                         self.ready_queue.enqueue(job)
-                        self.io_queue.dequeue()
-                job.decrement_duration()
+                        self.io_queue.remove(job)
+                else:
+                    job.decrement_duration()
 
     def is_done(self):
         """Returns True if all queues are empty."""
@@ -222,13 +223,9 @@ class Scheduler:
                 self.fetch_jobs(client_id, session_id, clock_time)
                 self.move_to_ready_queue(client_id, session_id)
                 self.process_ready_queue()
-                # self.scheduling_algorithm()
                 self.process_running_queue(client_id, session_id)
                 self.process_waiting_queue()
                 self.process_io_queue(client_id, session_id)
-                # self.print_queues()
-                # if self.is_done():
-                #     break
                 live.update(self.generate_table())
 
 
