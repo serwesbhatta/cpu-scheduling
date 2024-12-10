@@ -9,6 +9,7 @@ from rich.layout import Layout
 from rich.text import Text
 from rich.panel import Panel
 
+
 class Scheduler:
     def __init__(self, clock, cpus, ios):
         self.jobs = Queue()
@@ -28,14 +29,22 @@ class Scheduler:
 
         # Queue Table
         self.queue_table = Table(title="Job Queues")
-        self.queue_table.add_column("Queue", justify="center", style="cyan", no_wrap=True)
-        self.queue_table.add_column("Jobs", justify="center", style="magenta", no_wrap=True)
+        self.queue_table.add_column(
+            "Queue", justify="center", style="cyan", no_wrap=True
+        )
+        self.queue_table.add_column(
+            "Jobs", justify="center", style="magenta", no_wrap=True
+        )
 
         # Populate queue table
         self.queue_table.add_row("New Queue", self.format_jobs(self.new_queue.jobs))
         self.queue_table.add_row("Ready Queue", self.format_jobs(self.ready_queue.jobs))
-        self.queue_table.add_row("Running Queue", self.format_jobs(self.running_queue.jobs))
-        self.queue_table.add_row("Waiting Queue", self.format_jobs(self.waiting_queue.jobs))
+        self.queue_table.add_row(
+            "Running Queue", self.format_jobs(self.running_queue.jobs)
+        )
+        self.queue_table.add_row(
+            "Waiting Queue", self.format_jobs(self.waiting_queue.jobs)
+        )
         self.queue_table.add_row("IO Queue", self.format_jobs(self.io_queue.jobs))
         self.queue_table.add_row("Exit Queue", self.format_jobs(self.exit_queue.jobs))
 
@@ -52,7 +61,9 @@ class Scheduler:
 
         # IO Table
         self.io_table = Table(title="IO Devices Status")
-        self.io_table.add_column("IO Device", justify="center", style="blue", no_wrap=True)
+        self.io_table.add_column(
+            "IO Device", justify="center", style="blue", no_wrap=True
+        )
         self.io_table.add_column("Job", justify="center", style="green", no_wrap=True)
 
         for io in self.ios:
@@ -63,11 +74,21 @@ class Scheduler:
 
         # Job Table
         self.job_table = Table(title="Job Status")
-        self.job_table.add_column("Job ID", justify="center", style="cyan", no_wrap=True)
-        self.job_table.add_column("Arrival Time", justify="center", style="magenta", no_wrap=True)
-        self.job_table.add_column("Priority", justify="center", style="yellow", no_wrap=True)
-        self.job_table.add_column("Burst Type", justify="center", style="green", no_wrap=True)
-        self.job_table.add_column("Burst Duration", justify="center", style="blue", no_wrap=True)
+        self.job_table.add_column(
+            "Job ID", justify="center", style="cyan", no_wrap=True
+        )
+        self.job_table.add_column(
+            "Arrival Time", justify="center", style="magenta", no_wrap=True
+        )
+        self.job_table.add_column(
+            "Priority", justify="center", style="yellow", no_wrap=True
+        )
+        self.job_table.add_column(
+            "Burst Type", justify="center", style="green", no_wrap=True
+        )
+        self.job_table.add_column(
+            "Burst Duration", justify="center", style="blue", no_wrap=True
+        )
 
         for job in self.jobs.jobs:
             self.job_table.add_row(
@@ -81,7 +102,7 @@ class Scheduler:
         left_column = Layout(name="left")
         # Add tables to layout
         left_column.split(
-            Layout(Panel(self.queue_table, title="Queues"), ratio=5, size = None),
+            Layout(Panel(self.queue_table, title="Queues"), ratio=5, size=None),
             Layout(Panel(self.cpu_table, title="CPU"), size=None, ratio=5),
             Layout(Panel(self.io_table, title="IO Devices"), size=None, ratio=5),
         )
@@ -90,7 +111,9 @@ class Scheduler:
         # right_column.update(Panel(self.job_table, title="Job Status"))
         right_column.split(
             Layout(Panel(self.job_table, title="Job Status"), ratio=5, size=None),
-            Layout(Panel(str(self.clock.current_time), title="Clock"), size=None, ratio=5),
+            Layout(
+                Panel(str(self.clock.current_time), title="Clock"), size=None, ratio=5
+            ),
         )
 
         # Combine left and right columns
@@ -138,11 +161,15 @@ class Scheduler:
             self.devices.assign_job(job)  # Assign the job to a free device
             self.running_queue.enqueue(job)
 
-    def process_ready_queue(self):
+    def process_ready_queue(self, priority=False):
         """Processes the ready queue."""
         for cpu in self.cpus:
             if cpu.is_free():
                 if not self.ready_queue.is_empty():
+                    if priority:
+                        self.ready_queue.jobs.sort(
+                            key=lambda x: x.priority, reverse=True
+                        )
                     job = self.ready_queue.dequeue()
                     cpu.load_job(job)
                     self.running_queue.enqueue(job, 0)
@@ -156,7 +183,9 @@ class Scheduler:
                     io.load_job(job)
                     self.io_queue.enqueue(job, 0)
 
-    def process_running_queue(self, client_id, session_id, algorithm, time_quantum = 5):
+    def process_running_queue(
+        self, client_id, session_id, algorithm, time_quantum=5, preemptive=False
+    ):
         """Processes the running queue."""
         if not self.running_queue.is_empty():
             for job in self.running_queue.jobs:
@@ -180,6 +209,9 @@ class Scheduler:
                     if job.time_slice_remaining is None:
                         job.time_slice_remaining = time_quantum
 
+                    job.decrement_duration()
+                    job.time_slice_remaining -= 1
+
                     if job.burst_complete():
                         for cpu in self.cpus:
                             if cpu.job and cpu.job.job_id == job.job_id:
@@ -201,9 +233,47 @@ class Scheduler:
                         job.time_slice_remaining = time_quantum
                         self.ready_queue.enqueue(job)
                         self.running_queue.remove(job)
-                    else:
-                        job.decrement_duration()
-                        job.time_slice_remaining -= 1
+
+            if algorithm == "PR":
+                for job in self.running_queue.jobs:
+                    job.decrement_duration()
+
+                for job in self.running_queue.jobs:
+                    if job.burst_complete():
+                        for cpu in self.cpus:
+                            if cpu.job and cpu.job.job_id == job.job_id:
+                                cpu.free()
+                        job.get_job_burst(client_id, session_id, job.job_id)
+                        if job.burst_type == "IO":
+                            self.waiting_queue.enqueue(job, 0)
+                            self.running_queue.remove(job)
+                        elif job.burst_type == "EXIT":
+                            self.exit_queue.enqueue(job, 0)
+                            self.running_queue.remove(job)
+                        else:
+                            self.ready_queue.enqueue(job)
+                            self.running_queue.remove(job)
+
+                if not self.ready_queue.is_empty():
+                    if preemptive:
+                        if not self.running_queue.is_empty():
+                            highest_priority_job = min(
+                                self.ready_queue.jobs, key=lambda x: x.priority
+                            )
+
+                            lowest_priority_job = max(
+                                self.running_queue.jobs, key=lambda x: x.priority
+                            )
+
+                            if lowest_priority_job.priority > highest_priority_job.priority:
+                                for cpu in self.cpus:
+                                    if cpu.job and cpu.job.job_id == lowest_priority_job.job_id:
+                                        cpu.free()
+                                        cpu.load_job(highest_priority_job)
+                                self.ready_queue.enqueue(lowest_priority_job)
+                                self.running_queue.remove(lowest_priority_job)
+                                self.running_queue.enqueue(highest_priority_job)
+                                self.ready_queue.jobs.remove(highest_priority_job)
 
     def process_io_queue(self, client_id, session_id):
         if not self.io_queue.is_empty():
@@ -252,7 +322,9 @@ class Scheduler:
                 self.fetch_jobs(client_id, session_id, clock_time)
                 self.move_to_ready_queue(client_id, session_id)
                 self.process_ready_queue()
-                self.process_running_queue(client_id, session_id, algorithm="RR")
+                self.process_running_queue(
+                    client_id, session_id, algorithm="PR", preemptive=False
+                )
                 self.process_waiting_queue()
                 self.process_io_queue(client_id, session_id)
                 live.update(self.generate_table())
