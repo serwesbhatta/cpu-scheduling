@@ -1,6 +1,10 @@
 class Queue:
     def __init__(self):
         self.jobs = []
+        
+        #for MLFQ
+        self.priority = None
+        self.time_slice = None
 
     def enqueue(self, item, index = None):
         """Adds an item to the front of the queue."""

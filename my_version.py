@@ -23,7 +23,28 @@ class Scheduler:
         self.ios = ios
         self.cpus = cpus
 
-    def generate_table(self):
+        # For MLFQ
+        self.q1 = Queue()
+        self.q2 = Queue()
+        self.q3 = Queue()
+        self.q4 = Queue()
+        self.q5 = Queue()
+
+        # Initialize the priority levels of the queues
+        self.q1.priority = 1
+        self.q2.priority = 2
+        self.q3.priority = 3
+        self.q4.priority = 4
+        self.q5.priority = 5
+
+        # Initialize the time slice of the queues
+        self.q1.time_slice = 5
+        self.q2.time_slice = 10
+        self.q3.time_slice = 15
+        self.q4.time_slice = 20
+        self.q5.time_slice = 25
+
+    def generate_table(self, algorithm=None):
         # Main layout
         layout = Layout()
 
@@ -89,6 +110,12 @@ class Scheduler:
         self.job_table.add_column(
             "Burst Duration", justify="center", style="blue", no_wrap=True
         )
+        self.job_table.add_column(
+            "Time Slice Remaining", justify="center", style="red", no_wrap=True
+        )
+        self.job_table.add_column(
+            "CPU Wait Time", justify="center", style="red", no_wrap=True
+        )
 
         for job in self.jobs.jobs:
             self.job_table.add_row(
@@ -97,26 +124,51 @@ class Scheduler:
                 str(job.priority),
                 job.burst_type,
                 str(job.burst_duration),
+                str(job.time_slice_remaining),
+                str(job.cpu_wait_time),
             )
 
+        if algorithm == "MLFQ":
+            self.priority_queue = Table(title="Priority Queues")
+            self.priority_queue.add_column(
+                "Queue", justify="center", style="cyan", no_wrap=True
+            )
+            self.priority_queue.add_column(
+                "Jobs", justify="center", style="magenta", no_wrap=True
+            )
+
+            self.priority_queue.add_row("Queue 1", self.format_jobs(self.q1.jobs))
+            self.priority_queue.add_row("Queue 2", self.format_jobs(self.q2.jobs))
+            self.priority_queue.add_row("Queue 3", self.format_jobs(self.q3.jobs))
+            self.priority_queue.add_row("Queue 4", self.format_jobs(self.q4.jobs))
+            self.priority_queue.add_row("Queue 5", self.format_jobs(self.q5.jobs))
+
         left_column = Layout(name="left")
-        # Add tables to layout
         left_column.split(
-            Layout(Panel(self.queue_table, title="Queues"), ratio=5, size=None),
+            Layout(Panel(self.queue_table), ratio=5, size=None),
             Layout(Panel(self.cpu_table, title="CPU"), size=None, ratio=5),
             Layout(Panel(self.io_table, title="IO Devices"), size=None, ratio=5),
         )
 
         right_column = Layout(name="right")
-        # right_column.update(Panel(self.job_table, title="Job Status"))
-        right_column.split(
-            Layout(Panel(self.job_table, title="Job Status"), ratio=5, size=None),
-            Layout(
-                Panel(str(self.clock.current_time), title="Clock"), size=None, ratio=5
-            ),
-        )
+        if algorithm == "MLFQ":
+            right_column.split(
+                Layout(Panel(self.job_table), ratio=5, size=None),
+                Layout(Panel(self.priority_queue, title="Priority Queues"), size=None, ratio=3),
+                Layout(
+                    Panel(str(self.clock.current_time), title="Clock"), size=None, ratio=1
+                ),
+            )
+        else:
+            right_column.split(
+                Layout(Panel(self.job_table), ratio=2, size=None),
+                Layout(
+                    Panel(str(self.clock.current_time), title="Clock"), size=None, ratio=1
+                ),
+            )
 
-        # Combine left and right columns
+        right_column["right"].ratio = 1
+
         layout.split_row(left_column, right_column)
         return layout
 
@@ -144,25 +196,44 @@ class Scheduler:
             print(f"Error: {response.status_code}")
             return None
 
-    def move_to_ready_queue(self, client_id, session_id):
+    def enqueue_priority_queue(self, job):
+        for queue in [self.q1, self.q2, self.q3, self.q4, self.q5]:
+            if job.priority == queue.priority:
+                job.time_slice_remaining = queue.time_slice
+                queue.enqueue(job)
+
+    def move_to_ready_queue(self, client_id, session_id, algorithm=None):
         """Moves jobs from the new queue to the ready queue."""
-        while not self.new_queue.is_empty():
-            job = self.new_queue.dequeue()
-            job.get_job_burst(client_id, session_id, job.job_id)
-            self.ready_queue.enqueue(job, 0)
+        if algorithm == "MLFQ":
+            while not self.new_queue.is_empty():
+                job = self.new_queue.dequeue()
+                job.get_job_burst(client_id, session_id, job.job_id)
+                for queue in [self.q1, self.q2, self.q3, self.q4, self.q5]:
+                    if job.priority == queue.priority:
+                        job.time_slice_remaining = queue.time_slice
+                        queue.enqueue(job)
+            for jobs in [self.q1, self.q2, self.q3, self.q4, self.q5]:
+                if not jobs.is_empty():
+                    job = jobs.dequeue()
+                    self.ready_queue.enqueue(job, 0)
+            self.ready_queue.jobs.sort(key=lambda x: x.priority, reverse=True)
+        else:
+            while not self.new_queue.is_empty():
+                job = self.new_queue.dequeue()
+                job.get_job_burst(client_id, session_id, job.job_id)
+                self.ready_queue.enqueue(job, 0)
 
-    def scheduling_algorithm(self):
-        """Determines the scheduling algorithm to use."""
-        """Implements First-Come-First-Serve (FCFS) scheduling."""
-        if not self.ready_queue.is_empty():
-            job = self.ready_queue.dequeue()
-
-            job = self.ready_queue.dequeue()
-            self.devices.assign_job(job)  # Assign the job to a free device
-            self.running_queue.enqueue(job)
-
-    def process_ready_queue(self, priority=False):
+    def process_ready_queue(self, algorithm=None,priority=False):
         """Processes the ready queue."""
+        if algorithm == "MLFQ":
+            for job in self.ready_queue.jobs:
+                if job.cpu_wait_time == 10:
+                    job.cpu_wait_time = 0
+                    if job.priority > 1:
+                        job.priority -= 1
+
+                job.cpu_wait_time += 1
+
         for cpu in self.cpus:
             if cpu.is_free():
                 if not self.ready_queue.is_empty():
@@ -202,6 +273,8 @@ class Scheduler:
                         elif job.burst_type == "EXIT":
                             self.exit_queue.enqueue(job, 0)
                             self.running_queue.remove(job)
+                            self.time_slice_remaining = None
+                            self.cpu_wait_time = None
                         else:
                             self.ready_queue.enqueue(job)
                             self.running_queue.remove(job)
@@ -223,6 +296,8 @@ class Scheduler:
                         elif job.burst_type == "EXIT":
                             self.exit_queue.enqueue(job, 0)
                             self.running_queue.remove(job)
+                            self.time_slice_remaining = None
+                            self.cpu_wait_time = None
                         else:
                             self.ready_queue.enqueue(job)
                             self.running_queue.remove(job)
@@ -237,8 +312,6 @@ class Scheduler:
             if algorithm == "PR":
                 for job in self.running_queue.jobs:
                     job.decrement_duration()
-
-                for job in self.running_queue.jobs:
                     if job.burst_complete():
                         for cpu in self.cpus:
                             if cpu.job and cpu.job.job_id == job.job_id:
@@ -274,6 +347,48 @@ class Scheduler:
                                 self.running_queue.remove(lowest_priority_job)
                                 self.running_queue.enqueue(highest_priority_job)
                                 self.ready_queue.jobs.remove(highest_priority_job)
+            elif algorithm == "MLFQ":
+                for job in self.running_queue.jobs:
+                    job.decrement_duration()
+                    job.time_slice_remaining -= 1
+
+                    if job.burst_complete():
+                        for cpu in self.cpus:
+                            if cpu.job and cpu.job.job_id == job.job_id:
+                                cpu.free()
+                        if job.time_slice_remaining == 0:
+                            if job.priority < 5:
+                                job.priority += 1
+                        else:
+                            if job.priority > 1:
+                                job.priority -= 1
+                        job.get_job_burst(client_id, session_id, job.job_id)
+
+                        for queue in [self.q1, self.q2, self.q3, self.q4, self.q5]:
+                            if job.priority == queue.priority:
+                                job.time_slice_remaining = queue.time_slice
+
+                        if job.burst_type == "IO":
+                            self.waiting_queue.enqueue(job, 0)
+                            self.running_queue.remove(job)
+                        elif job.burst_type == "EXIT":
+                            self.exit_queue.enqueue(job, 0)
+                            self.running_queue.remove(job)
+                        else:
+                            self.running_queue.remove(job)
+                            self.enqueue_priority_queue(job)
+
+                    if job.time_slice_remaining == 0:
+                        for cpu in self.cpus:
+                            if cpu.job and cpu.job.job_id == job.job_id:
+                                cpu.free()
+                        if job.priority < 5:
+                            job.priority += 1
+                            self.running_queue.remove(job)
+                            self.enqueue_priority_queue(job)
+                        else:
+                            self.running_queue.remove(job)
+                            self.enqueue_priority_queue(job)
 
     def process_io_queue(self, client_id, session_id):
         if not self.io_queue.is_empty():
@@ -315,19 +430,19 @@ class Scheduler:
         session_id = filters["session_id"]
         clock_time = filters["clock_time"]
 
-        with Live(self.generate_table(), refresh_per_second=20) as live:
+        with Live(self.generate_table("MLFQ"), refresh_per_second=20) as live:
             while True:
                 self.clock.increment()
                 clock_time = self.clock.get_time()
                 self.fetch_jobs(client_id, session_id, clock_time)
-                self.move_to_ready_queue(client_id, session_id)
-                self.process_ready_queue()
+                self.move_to_ready_queue(client_id, session_id, algorithm="MLFQ")
+                self.process_ready_queue(algorithm="MLFQ")
                 self.process_running_queue(
-                    client_id, session_id, algorithm="PR", preemptive=False
+                    client_id, session_id, algorithm="MLFQ", preemptive=False
                 )
                 self.process_waiting_queue()
                 self.process_io_queue(client_id, session_id)
-                live.update(self.generate_table())
+                live.update(self.generate_table(algorithm="MLFQ"))
                 sleep(0.5)
 
 
@@ -350,7 +465,6 @@ def api_start():
         "priority_levels": [1, 2, 3, 4, 5],
     }
     response = init(config)
-    print(f"Response: {response}")
     session_id = response["session_id"]
     start_clock = response["start_clock"]
     return start_clock, session_id
